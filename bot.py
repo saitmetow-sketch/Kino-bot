@@ -1,7 +1,9 @@
-    import logging
+import logging
 import json
 import os
 import asyncio
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -12,12 +14,25 @@ from telegram.ext import (
     filters,
 )
 
-# Logging
+# --- RENDER PORT XATOSINI YO'QOTISH UCHUN SOKHTA SERVER ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot ishladi!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    server.serve_forever()
+
+# --- LOGGING ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- KONFIGURATSIYA ---
-TOKEN = "YOUR_BOT_TOKEN_HERE"  # BotFather tokeningiz
+# Render Environment Variables bo'limidan BOT_TOKEN olinadi, agar yo'q bo meyoriy token qo'yiladi
+TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")  
 MAIN_ADMIN_ID = 7020448136
 
 FILES = {
@@ -31,8 +46,11 @@ FILES = {
 def load_data(filename, default):
     if not os.path.exists(filename):
         return default
-    with open(filename, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
 
 def save_data(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
@@ -73,7 +91,6 @@ def build_sub_keyboard(unsubbed_channels: list):
 
 # --- ADMIN MENYU TUGMALARI ---
 def get_admin_keyboard():
-    channels = load_data(FILES["channels"], [])
     keyboard = [
         [InlineKeyboardButton("🎬 Kino qo'shish", callback_data="adm_add_movie"), InlineKeyboardButton("🗑 Kino o'chirish", callback_data="adm_del_movie")],
         [InlineKeyboardButton("📢 Kanal qo'shish", callback_data="adm_add_chan"), InlineKeyboardButton("❌ Kanal o'chirish", callback_data="adm_del_chan")],
@@ -280,6 +297,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- MAIN ---
 def main():
+    # Render portini ochish uchun fonga kichik serverni yurgazamiz
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -287,28 +307,8 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_callback_handler))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
-    print("Bot ishga tushdi...")
+    print("Kino bot ishga tushdi...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-# Render uchun portni band qilib turuvchi soxta server
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot ishlayapti!")
-
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    server.serve_forever()
-
-# Botni ishga tushirish qismi (agarda sizda if __name__ == '__main__': bo'lsa o'sha yerga qo'shing)
-if __name__ == "__main__":
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-    main()  # yoki botni yurgazadigan funksiyangiz nomi (masalan: app.run_polling())
