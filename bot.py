@@ -132,7 +132,7 @@ async def check_sub(update, context):
     )
 
 
-async def admin(update, context):
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not is_admin(user_id):
@@ -177,7 +177,10 @@ async def admin(update, context):
     await update.message.reply_text(
         "👑 ADMIN PANEL",
         reply_markup=InlineKeyboardMarkup(buttons)
-)async def callbacks(update, context):
+    )
+
+
+async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -195,205 +198,110 @@ async def admin(update, context):
         )
         return
 
-    if data == "movies":
+    if data == "back":
         buttons = [
-            [InlineKeyboardButton(
-                "➕ Kino qo'shish",
-                callback_data="add_movie"
-            )],
-            [InlineKeyboardButton(
-                "🗑 Kino o'chirish",
-                callback_data="delete_movie"
-            )],
-            [InlineKeyboardButton(
-                "📋 Kinolar ro'yxati",
-                callback_data="movie_list"
-            )],
-            [InlineKeyboardButton(
-                "🔙 Orqaga",
-                callback_data="back"
-            )]
+            [InlineKeyboardButton("🎬 Kino boshqaruvi", callback_data="movies")],
+            [InlineKeyboardButton("📢 Kanal boshqaruvi", callback_data="channels")],
+            [InlineKeyboardButton("👥 Admin boshqaruvi", callback_data="admins")],
+            [InlineKeyboardButton("📊 Statistika", callback_data="stats")],
+            [InlineKeyboardButton("📣 Reklama", callback_data="broadcast")]
         ]
+        await query.edit_message_text("👑 ADMIN PANEL", reply_markup=InlineKeyboardMarkup(buttons))
 
-        await query.edit_message_text(
-            "🎬 KINO BOSHQARUVI",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+    elif data == "movies":
+        buttons = [
+            [InlineKeyboardButton("➕ Kino qo'shish", callback_data="add_movie")],
+            [InlineKeyboardButton("🗑 Kino o'chirish", callback_data="delete_movie")],
+            [InlineKeyboardButton("📋 Kinolar ro'yxati", callback_data="movie_list")],
+            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
+        ]
+        await query.edit_message_text("🎬 KINO BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "add_movie":
         context.user_data["action"] = "movie_code"
-
-        await query.edit_message_text(
-            "➕ Kino kodini yuboring.\n\n"
-            "Masalan: 12"
-        )
+        await query.edit_message_text("➕ Kino kodini yuboring.\n\nMasalan: 12")
 
     elif data == "delete_movie":
         context.user_data["action"] = "delete_movie"
-
-        await query.edit_message_text(
-            "🗑 O'chiriladigan kino kodini yuboring."
-        )
+        await query.edit_message_text("🗑 O'chiriladigan kino kodini yuboring.")
 
     elif data == "movie_list":
-        cur.execute(
-            "SELECT code FROM movies ORDER BY code"
-        )
-
+        cur.execute("SELECT code FROM movies ORDER BY code")
         movies = cur.fetchall()
 
         if movies:
             text = "📋 KINOLAR:\n\n"
-
             for movie in movies:
                 text += f"🎬 Kod: {movie[0]}\n"
         else:
             text = "❌ Hozircha kinolar yo'q."
-
         await query.edit_message_text(text)
 
     elif data == "channels":
         buttons = [
-            [InlineKeyboardButton(
-                "➕ Kanal qo'shish",
-                callback_data="add_channel"
-            )],
-            [InlineKeyboardButton(
-                "🗑 Kanal o'chirish",
-                callback_data="delete_channel"
-            )],
-            [InlineKeyboardButton(
-                "📋 Kanallar ro'yxati",
-                callback_data="channel_list"
-            )],
-            [InlineKeyboardButton(
-                "🔙 Orqaga",
-                callback_data="back"
-            )]
+            [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_channel")],
+            [InlineKeyboardButton("🗑 Kanal o'chirish", callback_data="delete_channel")],
+            [InlineKeyboardButton("📋 Kanallar ro'yxati", callback_data="channel_list")],
+            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
         ]
-
-        await query.edit_message_text(
-            "📢 KANAL BOSHQARUVI",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await query.edit_message_text("📢 KANAL BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "add_channel":
         context.user_data["action"] = "add_channel"
-
-        await query.edit_message_text(
-            "➕ Kanal username'ini yuboring.\n\n"
-            "Masalan: @kanal"
-        )
+        await query.edit_message_text("➕ Kanal username'ini yuboring.\n\nMasalan: @kanal")
 
     elif data == "delete_channel":
         context.user_data["action"] = "delete_channel"
-
-        await query.edit_message_text(
-            "🗑 O'chiriladigan kanal username'ini yuboring."
-        )
+        await query.edit_message_text("🗑 O'chiriladigan kanal username'ini yuboring.")
 
     elif data == "channel_list":
-        cur.execute(
-            "SELECT username FROM channels"
-        )
-
+        cur.execute("SELECT username FROM channels")
         channels = cur.fetchall()
-
         text = "📢 KANALLAR:\n\n"
-
         for channel in channels:
             text += f"📢 {channel[0]}\n"
-
         await query.edit_message_text(text)
 
     elif data == "admins":
-
         if not is_owner(user_id):
-            await query.answer(
-                "❌ Faqat bosh admin bu bo'limga kira oladi!",
-                show_alert=True
-            )
+            await query.answer("❌ Faqat bosh admin bu bo'limga kira oladi!", show_alert=True)
             return
 
         buttons = [
-            [InlineKeyboardButton(
-                "➕ Admin qo'shish",
-                callback_data="add_admin"
-            )],
-            [InlineKeyboardButton(
-                "🗑 Admin o'chirish",
-                callback_data="delete_admin"
-            )],
-            [InlineKeyboardButton(
-                "📋 Adminlar",
-                callback_data="admin_list"
-            )],
-            [InlineKeyboardButton(
-                "🔙 Orqaga",
-                callback_data="back"
-            )]
+            [InlineKeyboardButton("➕ Admin qo'shish", callback_data="add_admin")],
+            [InlineKeyboardButton("🗑 Admin o'chirish", callback_data="delete_admin")],
+            [InlineKeyboardButton("📋 Adminlar", callback_data="admin_list")],
+            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
         ]
-
-        await query.edit_message_text(
-            "👥 ADMIN BOSHQARUVI",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await query.edit_message_text("👥 ADMIN BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "add_admin":
-
-        if not is_owner(user_id):
-            return
-
+        if not is_owner(user_id): return
         context.user_data["action"] = "add_admin"
-
-        await query.edit_message_text(
-            "➕ Yangi adminning Telegram ID raqamini yuboring."
-        )
+        await query.edit_message_text("➕ Yangi adminning Telegram ID raqamini yuboring.")
 
     elif data == "delete_admin":
-
-        if not is_owner(user_id):
-            return
-
+        if not is_owner(user_id): return
         context.user_data["action"] = "delete_admin"
-
-        await query.edit_message_text(
-            "🗑 O'chiriladigan admin ID raqamini yuboring."
-        )
+        await query.edit_message_text("🗑 O'chiriladigan admin ID raqamini yuboring.")
 
     elif data == "admin_list":
-
-        cur.execute(
-            "SELECT user_id FROM admins"
-        )
-
+        cur.execute("SELECT user_id FROM admins")
         admins = cur.fetchall()
-
         text = "👥 ADMINLAR:\n\n"
-
         for admin_id in admins:
             if admin_id[0] == OWNER_ID:
                 text += f"👑 {admin_id[0]} — Bosh admin\n"
             else:
                 text += f"👤 {admin_id[0]} — Admin\n"
-
         await query.edit_message_text(text)
 
     elif data == "stats":
-
-        cur.execute(
-            "SELECT COUNT(*) FROM users"
-        )
+        cur.execute("SELECT COUNT(*) FROM users")
         users = cur.fetchone()[0]
-
-        cur.execute(
-            "SELECT COUNT(*) FROM movies"
-        )
+        cur.execute("SELECT COUNT(*) FROM movies")
         movies = cur.fetchone()[0]
-
-        cur.execute(
-            "SELECT COUNT(*) FROM channels"
-        )
+        cur.execute("SELECT COUNT(*) FROM channels")
         channels = cur.fetchone()[0]
 
         await query.edit_message_text(
@@ -404,27 +312,22 @@ async def admin(update, context):
         )
 
     elif data == "broadcast":
-
         context.user_data["action"] = "broadcast"
+        await query.edit_message_text("📣 Reklama uchun matnni yuboring.")
 
-        await query.edit_message_text(
-            "📣 Reklama uchunasync def receive_video(update, context):
+
+async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     if not is_admin(user_id):
         return
 
     action = context.user_data.get("action")
-
     if action != "waiting_video":
         return
 
     code = context.user_data.get("movie_code")
-
     if not code:
-        await update.message.reply_text(
-            "❌ Kino kodi topilmadi."
-        )
+        await update.message.reply_text("❌ Kino kodi topilmadi.")
         return
 
     file_id = update.message.video.file_id
@@ -433,7 +336,6 @@ async def admin(update, context):
         "INSERT OR REPLACE INTO movies (code, file_id) VALUES (?, ?)",
         (code, file_id)
     )
-
     db.commit()
 
     context.user_data.clear()
@@ -444,7 +346,7 @@ async def admin(update, context):
     )
 
 
-async def text_handler(update, context):
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
@@ -453,316 +355,150 @@ async def text_handler(update, context):
     # =========================
     # KINO QO'SHISH
     # =========================
-
     if is_admin(user_id) and action == "movie_code":
-
         context.user_data["movie_code"] = text
         context.user_data["action"] = "waiting_video"
-
         await update.message.reply_text(
             f"🔢 Kod: {text}\n\n"
             "🎬 Endi shu kino uchun to'liq videoni yuboring."
         )
-
         return
-
 
     # =========================
     # KINO O'CHIRISH
     # =========================
-
     if is_admin(user_id) and action == "delete_movie":
-
-        cur.execute(
-            "DELETE FROM movies WHERE code=?",
-            (text,)
-        )
-
+        cur.execute("DELETE FROM movies WHERE code=?", (text,))
         db.commit()
 
         if cur.rowcount > 0:
-            await update.message.reply_text(
-                f"✅ {text} kodli kino o'chirildi."
-            )
+            await update.message.reply_text(f"✅ {text} kodli kino o'chirildi.")
         else:
-            await update.message.reply_text(
-                "❌ Bunday kodli kino topilmadi."
-            )
-
+            await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
         context.user_data.clear()
-
         return
-
 
     # =========================
     # KANAL QO'SHISH
     # =========================
-
     if is_admin(user_id) and action == "add_channel":
-
         if not text.startswith("@"):
-            await update.message.reply_text(
-                "❌ Kanal username'i @ bilan boshlanishi kerak.\n\n"
-                "Masalan: @kanal98766"
-            )
+            await update.message.reply_text("❌ Kanal username'i @ bilan boshlanishi kerak.\n\nMasalan: @kanal98766")
             return
 
-        cur.execute(
-            "INSERT OR IGNORE INTO channels (username) VALUES (?)",
-            (text,)
-        )
-
+        cur.execute("INSERT OR IGNORE INTO channels (username) VALUES (?)", (text,))
         db.commit()
-
         context.user_data.clear()
-
-        await update.message.reply_text(
-            f"✅ {text} majburiy obuna kanaliga qo'shildi."
-        )
-
+        await update.message.reply_text(f"✅ {text} majburiy obuna kanaliga qo'shildi.")
         return
-
 
     # =========================
     # KANAL O'CHIRISH
     # =========================
-
     if is_admin(user_id) and action == "delete_channel":
-
         if text == DEFAULT_CHANNEL:
-            await update.message.reply_text(
-                "❌ Boshlang'ich kanalni o'chirib bo'lmaydi."
-            )
+            await update.message.reply_text("❌ Boshlang'ich kanalni o'chirib bo'lmaydi.")
             return
 
-        cur.execute(
-            "DELETE FROM channels WHERE username=?",
-            (text,)
-        )
-
+        cur.execute("DELETE FROM channels WHERE username=?", (text,))
         db.commit()
 
         if cur.rowcount > 0:
-            await update.message.reply_text(
-                f"✅ {text} kanali o'chirildi."
-            )
+            await update.message.reply_text(f"✅ {text} kanali o'chirildi.")
         else:
-            await update.message.reply_text(
-                "❌ Bunday kanal topilmadi."
-            )
-
+            await update.message.reply_text("❌ Bunday kanal topilmadi.")
         context.user_data.clear()
-
         return
-
 
     # =========================
     # ADMIN QO'SHISH
     # =========================
-
-    if is_admin(user_id) and is_owner(user_id):
-
-        if action == "add_admin":
-
-            try:
-                new_admin = int(text)
-
-                cur.execute(
-                    "INSERT OR IGNORE INTO admins (user_id) VALUES (?)",
-                    (new_admin,)
-                )
-
-                db.commit()
-
-                await update.message.reply_text(
-                    f"✅ {new_admin} admin qilindi."
-                )
-
-            except ValueError:
-
-                await update.message.reply_text(
-                    "❌ Telegram ID faqat raqam bo'lishi kerak."
-                )
-
-            context.user_data.clear()
-
-            return
-
+    if is_admin(user_id) and is_owner(user_id) and action == "add_admin":
+        try:
+            new_admin = int(text)
+            cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (new_admin,))
+            db.commit()
+            await update.message.reply_text(f"✅ {new_admin} admin qilindi.")
+        except ValueError:
+            await update.message.reply_text("❌ Telegram ID faqat raqam bo'lishi kerak.")
+        context.user_data.clear()
+        return
 
     # =========================
     # ADMIN O'CHIRISH
     # =========================
-
-    if is_admin(user_id) and is_owner(user_id):
-
-        if action == "delete_admin":
-
-            try:
-                delete_id = int(text)
-
-                if delete_id == OWNER_ID:
-
-                    await update.message.reply_text(
-                        "❌ Bosh adminni o'chirib bo'lmaydi."
-                    )
-
+    if is_admin(user_id) and is_owner(user_id) and action == "delete_admin":
+        try:
+            delete_id = int(text)
+            if delete_id == OWNER_ID:
+                await update.message.reply_text("❌ Bosh adminni o'chirib bo'lmaydi.")
+            else:
+                cur.execute("DELETE FROM admins WHERE user_id=?", (delete_id,))
+                db.commit()
+                if cur.rowcount > 0:
+                    await update.message.reply_text("✅ Admin o'chirildi.")
                 else:
-
-                    cur.execute(
-                        "DELETE FROM admins WHERE user_id=?",
-                        (delete_id,)
-                    )
-
-                    db.commit()
-
-                    if cur.rowcount > 0:
-
-                        await update.message.reply_text(
-                            "✅ Admin o'chirildi."
-                        )
-
-                    else:
-
-                        await update.message.reply_text(
-                            "❌ Bunday admin topilmadi."
-                        )
-
-            except ValueError:
-
-                await update.message.reply_text(
-                    "❌ Noto'g'ri Telegram ID."
-                )
-
-            context.user_data.clear()
-
-            return
-
+                    await update.message.reply_text("❌ Bunday admin topilmadi.")
+        except ValueError:
+            await update.message.reply_text("❌ Noto'g'ri Telegram ID.")
+        context.user_data.clear()
+        return
 
     # =========================
     # REKLAMA
     # =========================
-
     if is_admin(user_id) and action == "broadcast":
-
-        cur.execute(
-            "SELECT user_id FROM users"
-        )
-
+        cur.execute("SELECT user_id FROM users")
         users = cur.fetchall()
-
         sent = 0
-
         for (target_id,) in users:
-
             try:
-
-                await context.bot.send_message(
-                    chat_id=target_id,
-                    text=text
-                )
-
+                await context.bot.send_message(chat_id=target_id, text=text)
                 sent += 1
-
             except Exception:
-
                 pass
-
         context.user_data.clear()
-
-        await update.message.reply_text(
-            f"📣 Reklama yuborildi!\n\n"
-            f"✅ Yuborildi: {sent} ta foydalanuvchi."
-        )
-
+        await update.message.reply_text(f"📣 Reklama yuborildi!\n\n✅ Yuborildi: {sent} ta foydalanuvchi.")
         return
-
 
     # =========================
     # KINO KODINI QIDIRISH
     # =========================
-
-    cur.execute(
-        "SELECT file_id FROM movies WHERE code=?",
-        (text,)
-    )
-
+    cur.execute("SELECT file_id FROM movies WHERE code=?", (text,))
     movie = cur.fetchone()
 
     if movie:
-
         await update.message.reply_video(
             video=movie[0],
-            caption=(
-                f"🎬 Kino kodi: {text}\n\n"
-                "🍿 Yoqimli tomosha!"
-            ),
+            caption=f"🎬 Kino kodi: {text}\n\n🍿 Yoqimli tomosha!",
             protect_content=True
         )
-
     else:
-
         await update.message.reply_text(
             "❌ Bunday kino kodi topilmadi.\n\n"
             "🔢 Kino kodini to'g'ri kiriting."
-          )# =========================
+        )
+
+
+# =========================
 # BOTNI ISHGA TUSHIRISH
 # =========================
-
 def main():
-
     if not BOT_TOKEN:
         raise RuntimeError(
             "BOT_TOKEN topilmadi! "
             "Render Environment Variables ichiga BOT_TOKEN qo'shing."
         )
 
-    app = Application.builder().token(
-        BOT_TOKEN
-    ).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    # START
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CallbackQueryHandler(callbacks))
+    app.add_handler(MessageHandler(filters.VIDEO, receive_video))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    # ADMIN PANEL
-    app.add_handler(
-        CommandHandler(
-            "admin",
-            admin
-        )
-    )
-
-    # TUGMALAR
-    app.add_handler(
-        CallbackQueryHandler(
-            callbacks
-        )
-    )
-
-    # VIDEO QABUL QILISH
-    app.add_handler(
-        MessageHandler(
-            filters.VIDEO,
-            receive_video
-        )
-    )
-
-    # MATN QABUL QILISH
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text_handler
-        )
-    )
-
-    print(
-        "🤖 Kino bot ishga tushdi!"
-    )
-
+    print("🤖 Kino bot ishga tushdi!")
     app.run_polling()
 
 
