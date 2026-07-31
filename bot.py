@@ -1,506 +1,294 @@
+    import logging
+import json
 import os
-import sqlite3
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 7020448136
-DEFAULT_CHANNEL = "@kanal98766"
+# Logging
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-db = sqlite3.connect("kino_bot.db", check_same_thread=False)
-cur = db.cursor()
+# --- KONFIGURATSIYA ---
+TOKEN = "YOUR_BOT_TOKEN_HERE"  # BotFather tokeningiz
+MAIN_ADMIN_ID = 7020448136
 
-cur.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS channels (username TEXT PRIMARY KEY)")
-cur.execute("""
-CREATE TABLE IF NOT EXISTS movies (
-    code TEXT PRIMARY KEY,
-    file_id TEXT NOT NULL
-)
-""")
+FILES = {
+    "movies": "movies.json",
+    "users": "users.json",
+    "channels": "channels.json",
+    "admins": "admins.json"
+}
 
-cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (OWNER_ID,))
-cur.execute("INSERT OR IGNORE INTO channels VALUES (?)", (DEFAULT_CHANNEL,))
-db.commit()
+# --- BAZA FUNKSIYALARI ---
+def load_data(filename, default):
+    if not os.path.exists(filename):
+        return default
+    with open(filename, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+def save_data(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
-def is_admin(user_id):
-    cur.execute(
-        "SELECT 1 FROM admins WHERE user_id=?",
-        (user_id,)
-    )
-    return cur.fetchone() is not None
+def is_admin(user_id: int) -> bool:
+    if user_id == MAIN_ADMIN_ID:
+        return True
+    admins = load_data(FILES["admins"], [])
+    return user_id in admins
 
+def register_user(user_id: int):
+    users = load_data(FILES["users"], [])
+    if user_id not in users:
+        users.append(user_id)
+        save_data(FILES["users"], users)
 
-def is_owner(user_id):
-    return user_id == OWNER_ID
+# --- OBUNA TEKSHIRISH ---
+async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TYPE):
+    channels = load_data(FILES["channels"], ["@kanal98766"])
+    unsubbed = []
+    for channel in channels:
+        try:
+            member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status not in ["creator", "administrator", "member"]:
+                unsubbed.append(channel)
+        except Exception:
+            unsubbed.append(channel)
+    return (len(unsubbed) == 0), unsubbed
 
+def build_sub_keyboard(unsubbed_channels: list):
+    keyboard = []
+    for ch in unsubbed_channels:
+        clean_ch = ch.replace("@", "")
+        keyboard.append([InlineKeyboardButton(f"📢 {ch} ga a'zo bo'lish", url=f"https://t.me/{clean_ch}")])
+    keyboard.append([InlineKeyboardButton("✅ Tekshirish", callback_data="check_sub")])
+    return InlineKeyboardMarkup(keyboard)
 
+# --- ADMIN MENYU TUGMALARI ---
+def get_admin_keyboard():
+    channels = load_data(FILES["channels"], [])
+    keyboard = [
+        [InlineKeyboardButton("🎬 Kino qo'shish", callback_data="adm_add_movie"), InlineKeyboardButton("🗑 Kino o'chirish", callback_data="adm_del_movie")],
+        [InlineKeyboardButton("📢 Kanal qo'shish", callback_data="adm_add_chan"), InlineKeyboardButton("❌ Kanal o'chirish", callback_data="adm_del_chan")],
+        [InlineKeyboardButton("📋 Kanallar", callback_data="adm_list_chan"), InlineKeyboardButton("📊 Statistika", callback_data="adm_stats")],
+        [InlineKeyboardButton("📨 Xabar yuborish", callback_data="adm_send"), InlineKeyboardButton("👥 Admin qo'shish", callback_data="adm_add_admin")],
+        [InlineKeyboardButton("🏠 Bosh sahifa", callback_data="adm_home")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# --- START & ADMIN ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    register_user(user_id)
+    is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
+    if is_subbed:
+        await update.message.reply_text("✅ Hamma kanalga obuna bo'ldingiz! Kino kodini kiriting:")
+    else:
+        await update.message.reply_text("Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:", reply_markup=build_sub_keyboard(unsubbed))
 
-    cur.execute(
-        "INSERT OR IGNORE INTO users VALUES (?)",
-        (user_id,)
-    )
-    db.commit()
-
-    await show_subscription(update, context)
-
-
-async def show_subscription(update, context):
-    cur.execute("SELECT username FROM channels")
-    channels = cur.fetchall()
-
-    buttons = []
-
-    for (channel,) in channels:
-        buttons.append([
-            InlineKeyboardButton(
-                f"📢 {channel}",
-                url=f"https://t.me/{channel.lstrip('@')}"
-            )
-        ])
-
-    buttons.append([
-        InlineKeyboardButton(
-            "✅ Tekshirish",
-            callback_data="check_sub"
-        )
-    ])
-
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id): return
+    channels = load_data(FILES["channels"], [])
     text = (
-        "👋 Assalomu alaykum!\n\n"
-        "🎬 Kino botdan foydalanish uchun "
-        "quyidagi kanallarga obuna bo'ling.\n\n"
-        "Obuna bo'lgach, "
-        "«✅ Tekshirish» tugmasini bosing."
+        "⚙️ **Admin panel**\n\n"
+        f"📣 Majburiy kanallar soni: **{len(channels)}** ta\n"
+        "Boshqarish uchun quyidagi tugmalardan birini tanlang:"
     )
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_admin_keyboard())
 
-    markup = InlineKeyboardMarkup(buttons)
-
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text,
-            reply_markup=markup
-        )
-    else:
-        await update.message.reply_text(
-            text,
-            reply_markup=markup
-        )
-
-
-async def check_sub(update, context):
+# --- CALLBACK HANDLER (TUGMALAR ISHLOVI) ---
+async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id
     await query.answer()
 
-    user_id = query.from_user.id
-
-    cur.execute("SELECT username FROM channels")
-    channels = cur.fetchall()
-
-    for (channel,) in channels:
-        try:
-            member = await context.bot.get_chat_member(
-                channel,
-                user_id
-            )
-
-            if member.status in ("left", "kicked"):
-                await query.answer(
-                    "❌ Hali barcha kanallarga obuna bo'lmagansiz!",
-                    show_alert=True
-                )
-                return
-
-        except Exception:
-            await query.answer(
-                f"⚠️ {channel} kanalini tekshirib bo'lmadi.",
-                show_alert=True
-            )
-            return
-
-    await query.edit_message_text(
-        "✅ Hamma kanalga obuna bo'ldingiz!\n\n"
-        "🔢 Kino kodini kiriting.\n"
-        "Masalan: 12"
-    )
-
-
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if not is_admin(user_id):
-        await update.message.reply_text(
-            "❌ Siz admin emassiz."
-        )
-        return
-
-    buttons = [
-        [
-            InlineKeyboardButton(
-                "🎬 Kino boshqaruvi",
-                callback_data="movies"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📢 Kanal boshqaruvi",
-                callback_data="channels"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "👥 Admin boshqaruvi",
-                callback_data="admins"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📊 Statistika",
-                callback_data="stats"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📣 Reklama",
-                callback_data="broadcast"
-            )
-        ]
-    ]
-
-    await update.message.reply_text(
-        "👑 ADMIN PANEL",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    data = query.data
-
-    if data == "check_sub":
-        await check_sub(update, context)
-        return
-
-    if not is_admin(user_id):
-        await query.answer(
-            "❌ Siz admin emassiz!",
-            show_alert=True
-        )
-        return
-
-    if data == "back":
-        buttons = [
-            [InlineKeyboardButton("🎬 Kino boshqaruvi", callback_data="movies")],
-            [InlineKeyboardButton("📢 Kanal boshqaruvi", callback_data="channels")],
-            [InlineKeyboardButton("👥 Admin boshqaruvi", callback_data="admins")],
-            [InlineKeyboardButton("📊 Statistika", callback_data="stats")],
-            [InlineKeyboardButton("📣 Reklama", callback_data="broadcast")]
-        ]
-        await query.edit_message_text("👑 ADMIN PANEL", reply_markup=InlineKeyboardMarkup(buttons))
-
-    elif data == "movies":
-        buttons = [
-            [InlineKeyboardButton("➕ Kino qo'shish", callback_data="add_movie")],
-            [InlineKeyboardButton("🗑 Kino o'chirish", callback_data="delete_movie")],
-            [InlineKeyboardButton("📋 Kinolar ro'yxati", callback_data="movie_list")],
-            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
-        ]
-        await query.edit_message_text("🎬 KINO BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
-
-    elif data == "add_movie":
-        context.user_data["action"] = "movie_code"
-        await query.edit_message_text("➕ Kino kodini yuboring.\n\nMasalan: 12")
-
-    elif data == "delete_movie":
-        context.user_data["action"] = "delete_movie"
-        await query.edit_message_text("🗑 O'chiriladigan kino kodini yuboring.")
-
-    elif data == "movie_list":
-        cur.execute("SELECT code FROM movies ORDER BY code")
-        movies = cur.fetchall()
-
-        if movies:
-            text = "📋 KINOLAR:\n\n"
-            for movie in movies:
-                text += f"🎬 Kod: {movie[0]}\n"
+    if query.data == "check_sub":
+        is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
+        if is_subbed:
+            await query.message.edit_text("✅ Hamma kanalga obuna bo'ldingiz! Kino kodini kiriting:")
         else:
-            text = "❌ Hozircha kinolar yo'q."
-        await query.edit_message_text(text)
+            await query.message.reply_text("Siz hali barcha kanallarga obuna bo'lmadingiz!", reply_markup=build_sub_keyboard(unsubbed))
+        return
 
-    elif data == "channels":
-        buttons = [
-            [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_channel")],
-            [InlineKeyboardButton("🗑 Kanal o'chirish", callback_data="delete_channel")],
-            [InlineKeyboardButton("📋 Kanallar ro'yxati", callback_data="channel_list")],
-            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
-        ]
-        await query.edit_message_text("📢 KANAL BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
+    if not is_admin(user_id): return
 
-    elif data == "add_channel":
-        context.user_data["action"] = "add_channel"
-        await query.edit_message_text("➕ Kanal username'ini yuboring.\n\nMasalan: @kanal")
+    if query.data == "adm_home":
+        channels = load_data(FILES["channels"], [])
+        await query.message.edit_text(f"⚙️ **Admin panel**\n\n📣 Majburiy kanallar soni: **{len(channels)}** ta", parse_mode="Markdown", reply_markup=get_admin_keyboard())
 
-    elif data == "delete_channel":
-        context.user_data["action"] = "delete_channel"
-        await query.edit_message_text("🗑 O'chiriladigan kanal username'ini yuboring.")
+    elif query.data == "adm_add_movie":
+        context.user_data["step"] = "awaiting_movie_code"
+        await query.message.reply_text("🎬 Qo'shmoqchi bo'lgan kino kodini yozing (Masalan: `101`):", parse_mode="Markdown")
 
-    elif data == "channel_list":
-        cur.execute("SELECT username FROM channels")
-        channels = cur.fetchall()
-        text = "📢 KANALLAR:\n\n"
-        for channel in channels:
-            text += f"📢 {channel[0]}\n"
-        await query.edit_message_text(text)
+    elif query.data == "adm_del_movie":
+        context.user_data["step"] = "awaiting_del_movie_code"
+        await query.message.reply_text("🗑 O'chirmoqchi bo'lgan kino kodini yozing (Masalan: `101`):", parse_mode="Markdown")
 
-    elif data == "admins":
-        if not is_owner(user_id):
-            await query.answer("❌ Faqat bosh admin bu bo'limga kira oladi!", show_alert=True)
+    elif query.data == "adm_add_chan":
+        context.user_data["step"] = "awaiting_channel_add"
+        await query.message.reply_text("📢 Qo'shmoqchi bo'lgan kanal usernamelerini yuboring (Masalan: `@kanal98766`):")
+
+    elif query.data == "adm_del_chan":
+        context.user_data["step"] = "awaiting_channel_del"
+        await query.message.reply_text("❌ O'chirmoqchi bo'lgan kanal usernamesini yuboring (Masalan: `@kanal98766`):")
+
+    elif query.data == "adm_list_chan":
+        channels = load_data(FILES["channels"], [])
+        txt = "📢 **Majburiy kanallar:**\n\n" + "\n".join(channels) if channels else "Hali kanallar yo'q."
+        await query.message.reply_text(txt, parse_mode="Markdown")
+
+    elif query.data == "adm_stats":
+        users = load_data(FILES["users"], [])
+        movies = load_data(FILES["movies"], {})
+        views = sum(m.get("views", 0) for m in movies.values())
+        txt = f"📊 **Statistika:**\n\n👤 Foydalanuvchilar: **{len(users)}** ta\n🎬 Kinolar: **{len(movies)}** ta\n👁 Ko'rishlar: **{views}** marta"
+        await query.message.reply_text(txt, parse_mode="Markdown")
+
+    elif query.data == "adm_send":
+        context.user_data["step"] = "awaiting_broadcast"
+        await query.message.reply_text("📨 Barcha obunachilarga yubormoqchi bo'lgan xabar/reklamangizni yuboring:")
+
+    elif query.data == "adm_add_admin":
+        if user_id != MAIN_ADMIN_ID:
+            await query.message.reply_text("Faqat Asosiy Admin yangi admin qo'sha oladi!")
+            return
+        context.user_data["step"] = "awaiting_admin_id"
+        await query.message.reply_text("👥 Yangi adminning Telegram ID raqamini yuboring:")
+
+# --- TEXT/MEDIA HANDLER ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    register_user(user_id)
+    step = context.user_data.get("step")
+
+    # ADMIN QADAMLARI
+    if is_admin(user_id) and step:
+        if step == "awaiting_movie_code":
+            context.user_data["temp_movie_code"] = update.message.text.strip()
+            context.user_data["step"] = "awaiting_movie_file"
+            await update.message.reply_text("Endi shu kod uchun kino faylini (video) yuboring:")
             return
 
-        buttons = [
-            [InlineKeyboardButton("➕ Admin qo'shish", callback_data="add_admin")],
-            [InlineKeyboardButton("🗑 Admin o'chirish", callback_data="delete_admin")],
-            [InlineKeyboardButton("📋 Adminlar", callback_data="admin_list")],
-            [InlineKeyboardButton("🔙 Orqaga", callback_data="back")]
-        ]
-        await query.edit_message_text("👥 ADMIN BOSHQARUVI", reply_markup=InlineKeyboardMarkup(buttons))
+        elif step == "awaiting_movie_file":
+            code = context.user_data.pop("temp_movie_code", None)
+            context.user_data.pop("step", None)
+            movies = load_data(FILES["movies"], {})
 
-    elif data == "add_admin":
-        if not is_owner(user_id): return
-        context.user_data["action"] = "add_admin"
-        await query.edit_message_text("➕ Yangi adminning Telegram ID raqamini yuboring.")
-
-    elif data == "delete_admin":
-        if not is_owner(user_id): return
-        context.user_data["action"] = "delete_admin"
-        await query.edit_message_text("🗑 O'chiriladigan admin ID raqamini yuboring.")
-
-    elif data == "admin_list":
-        cur.execute("SELECT user_id FROM admins")
-        admins = cur.fetchall()
-        text = "👥 ADMINLAR:\n\n"
-        for admin_id in admins:
-            if admin_id[0] == OWNER_ID:
-                text += f"👑 {admin_id[0]} — Bosh admin\n"
+            if update.message.video:
+                movies[code] = {"type": "video", "file_id": update.message.video.file_id, "caption": update.message.caption or "", "views": 0}
+            elif update.message.document:
+                movies[code] = {"type": "document", "file_id": update.message.document.file_id, "caption": update.message.caption or "", "views": 0}
             else:
-                text += f"👤 {admin_id[0]} — Admin\n"
-        await query.edit_message_text(text)
+                movies[code] = {"type": "text", "text": update.message.text, "views": 0}
 
-    elif data == "stats":
-        cur.execute("SELECT COUNT(*) FROM users")
-        users = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM movies")
-        movies = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM channels")
-        channels = cur.fetchone()[0]
-
-        await query.edit_message_text(
-            f"📊 STATISTIKA\n\n"
-            f"👤 Foydalanuvchilar: {users}\n"
-            f"🎬 Kinolar: {movies}\n"
-            f"📢 Kanallar: {channels}"
-        )
-
-    elif data == "broadcast":
-        context.user_data["action"] = "broadcast"
-        await query.edit_message_text("📣 Reklama uchun matnni yuboring.")
-
-
-async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        return
-
-    action = context.user_data.get("action")
-    if action != "waiting_video":
-        return
-
-    code = context.user_data.get("movie_code")
-    if not code:
-        await update.message.reply_text("❌ Kino kodi topilmadi.")
-        return
-
-    file_id = update.message.video.file_id
-
-    cur.execute(
-        "INSERT OR REPLACE INTO movies (code, file_id) VALUES (?, ?)",
-        (code, file_id)
-    )
-    db.commit()
-
-    context.user_data.clear()
-
-    await update.message.reply_text(
-        f"✅ Kino muvaffaqiyatli saqlandi!\n\n"
-        f"🔢 Kino kodi: {code}"
-    )
-
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    action = context.user_data.get("action")
-
-    # =========================
-    # KINO QO'SHISH
-    # =========================
-    if is_admin(user_id) and action == "movie_code":
-        context.user_data["movie_code"] = text
-        context.user_data["action"] = "waiting_video"
-        await update.message.reply_text(
-            f"🔢 Kod: {text}\n\n"
-            "🎬 Endi shu kino uchun to'liq videoni yuboring."
-        )
-        return
-
-    # =========================
-    # KINO O'CHIRISH
-    # =========================
-    if is_admin(user_id) and action == "delete_movie":
-        cur.execute("DELETE FROM movies WHERE code=?", (text,))
-        db.commit()
-
-        if cur.rowcount > 0:
-            await update.message.reply_text(f"✅ {text} kodli kino o'chirildi.")
-        else:
-            await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
-        context.user_data.clear()
-        return
-
-    # =========================
-    # KANAL QO'SHISH
-    # =========================
-    if is_admin(user_id) and action == "add_channel":
-        if not text.startswith("@"):
-            await update.message.reply_text("❌ Kanal username'i @ bilan boshlanishi kerak.\n\nMasalan: @kanal98766")
+            save_data(FILES["movies"], movies)
+            await update.message.reply_text(f"✅ `{code}` kodli kino saqlandi!", parse_mode="Markdown")
             return
 
-        cur.execute("INSERT OR IGNORE INTO channels (username) VALUES (?)", (text,))
-        db.commit()
-        context.user_data.clear()
-        await update.message.reply_text(f"✅ {text} majburiy obuna kanaliga qo'shildi.")
-        return
-
-    # =========================
-    # KANAL O'CHIRISH
-    # =========================
-    if is_admin(user_id) and action == "delete_channel":
-        if text == DEFAULT_CHANNEL:
-            await update.message.reply_text("❌ Boshlang'ich kanalni o'chirib bo'lmaydi.")
-            return
-
-        cur.execute("DELETE FROM channels WHERE username=?", (text,))
-        db.commit()
-
-        if cur.rowcount > 0:
-            await update.message.reply_text(f"✅ {text} kanali o'chirildi.")
-        else:
-            await update.message.reply_text("❌ Bunday kanal topilmadi.")
-        context.user_data.clear()
-        return
-
-    # =========================
-    # ADMIN QO'SHISH
-    # =========================
-    if is_admin(user_id) and is_owner(user_id) and action == "add_admin":
-        try:
-            new_admin = int(text)
-            cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (new_admin,))
-            db.commit()
-            await update.message.reply_text(f"✅ {new_admin} admin qilindi.")
-        except ValueError:
-            await update.message.reply_text("❌ Telegram ID faqat raqam bo'lishi kerak.")
-        context.user_data.clear()
-        return
-
-    # =========================
-    # ADMIN O'CHIRISH
-    # =========================
-    if is_admin(user_id) and is_owner(user_id) and action == "delete_admin":
-        try:
-            delete_id = int(text)
-            if delete_id == OWNER_ID:
-                await update.message.reply_text("❌ Bosh adminni o'chirib bo'lmaydi.")
+        elif step == "awaiting_del_movie_code":
+            context.user_data.pop("step", None)
+            code = update.message.text.strip()
+            movies = load_data(FILES["movies"], {})
+            if code in movies:
+                del movies[code]
+                save_data(FILES["movies"], movies)
+                await update.message.reply_text(f"🗑 `{code}` kodli kino o'chirildi!", parse_mode="Markdown")
             else:
-                cur.execute("DELETE FROM admins WHERE user_id=?", (delete_id,))
-                db.commit()
-                if cur.rowcount > 0:
-                    await update.message.reply_text("✅ Admin o'chirildi.")
-                else:
-                    await update.message.reply_text("❌ Bunday admin topilmadi.")
-        except ValueError:
-            await update.message.reply_text("❌ Noto'g'ri Telegram ID.")
-        context.user_data.clear()
-        return
+                await update.message.reply_text("❌ Kiritilgan kod bo'yicha kino topilmadi.")
+            return
 
-    # =========================
-    # REKLAMA
-    # =========================
-    if is_admin(user_id) and action == "broadcast":
-        cur.execute("SELECT user_id FROM users")
-        users = cur.fetchall()
-        sent = 0
-        for (target_id,) in users:
+        elif step == "awaiting_channel_add":
+            context.user_data.pop("step", None)
+            ch = update.message.text.strip()
+            channels = load_data(FILES["channels"], [])
+            if ch not in channels:
+                channels.append(ch)
+                save_data(FILES["channels"], channels)
+                await update.message.reply_text(f"✅ Kanal qo'shildi: {ch}")
+            else:
+                await update.message.reply_text("Ushbu kanal ro'yxatda bor.")
+            return
+
+        elif step == "awaiting_channel_del":
+            context.user_data.pop("step", None)
+            ch = update.message.text.strip()
+            channels = load_data(FILES["channels"], [])
+            if ch in channels:
+                channels.remove(ch)
+                save_data(FILES["channels"], channels)
+                await update.message.reply_text(f"🗑 Kanal o'chirildi: {ch}")
+            else:
+                await update.message.reply_text("Kanal topilmadi.")
+            return
+
+        elif step == "awaiting_admin_id":
+            context.user_data.pop("step", None)
             try:
-                await context.bot.send_message(chat_id=target_id, text=text)
-                sent += 1
-            except Exception:
-                pass
-        context.user_data.clear()
-        await update.message.reply_text(f"📣 Reklama yuborildi!\n\n✅ Yuborildi: {sent} ta foydalanuvchi.")
+                aid = int(update.message.text.strip())
+                admins = load_data(FILES["admins"], [])
+                if aid not in admins:
+                    admins.append(aid)
+                    save_data(FILES["admins"], admins)
+                    await update.message.reply_text(f"✅ Yangi admin qo'shildi: `{aid}`", parse_mode="Markdown")
+            except ValueError:
+                await update.message.reply_text("Raqamlardan iborat ID kiriting!")
+            return
+
+        elif step == "awaiting_broadcast":
+            context.user_data.pop("step", None)
+            users = load_data(FILES["users"], [])
+            count = 0
+            for uid in users:
+                try:
+                    await update.message.copy(chat_id=uid)
+                    count += 1
+                    await asyncio.sleep(0.04)
+                except Exception:
+                    pass
+            await update.message.reply_text(f"✅ Post {count} ta foydalanuvchiga yuborildi!")
+            return
+
+    # FOYDALANUVCHILAR UCHUN (Kino izlash)
+    is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
+    if not is_subbed:
+        await update.message.reply_text("Avval barcha kanallarga obuna bo'ling!", reply_markup=build_sub_keyboard(unsubbed))
         return
 
-    # =========================
-    # KINO KODINI QIDIRISH
-    # =========================
-    cur.execute("SELECT file_id FROM movies WHERE code=?", (text,))
-    movie = cur.fetchone()
+    code = update.message.text.strip()
+    movies = load_data(FILES["movies"], {})
 
-    if movie:
-        await update.message.reply_video(
-            video=movie[0],
-            caption=f"🎬 Kino kodi: {text}\n\n🍿 Yoqimli tomosha!",
-            protect_content=True
-        )
+    if code in movies:
+        m = movies[code]
+        m["views"] = m.get("views", 0) + 1
+        save_data(FILES["movies"], movies)
+
+        if m["type"] == "video":
+            await update.message.reply_video(video=m["file_id"], caption=m.get("caption", ""), protect_content=True)
+        elif m["type"] == "document":
+            await update.message.reply_document(document=m["file_id"], caption=m.get("caption", ""), protect_content=True)
+        elif m["type"] == "text":
+            await update.message.reply_text(text=m["text"])
     else:
-        await update.message.reply_text(
-            "❌ Bunday kino kodi topilmadi.\n\n"
-            "🔢 Kino kodini to'g'ri kiriting."
-        )
+        await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
 
-
-# =========================
-# BOTNI ISHGA TUSHIRISH
-# =========================
+# --- MAIN ---
 def main():
-    if not BOT_TOKEN:
-        raise RuntimeError(
-            "BOT_TOKEN topilmadi! "
-            "Render Environment Variables ichiga BOT_TOKEN qo'shing."
-        )
-
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin))
-    app.add_handler(CallbackQueryHandler(callbacks))
-    app.add_handler(MessageHandler(filters.VIDEO, receive_video))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
-    print("🤖 Kino bot ishga tushdi!")
+    print("Bot ishga tushdi...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
