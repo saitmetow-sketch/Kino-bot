@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 # --- KONFIGURATSIYA ---
 TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 MAIN_ADMIN_ID = 7020448136
+DATABASE_CHANNEL_ID = -1004290096342  # Sizning yopiq baza kanalingiz
 
 FILES = {
     "movies": "movies.json",
@@ -262,16 +263,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("step", None)
             movies = load_data(FILES["movies"], {})
 
-            if update.message.video:
-                movies[code] = {"type": "video", "file_id": update.message.video.file_id, "caption": update.message.caption or "", "views": 0}
+            try:
+                # Videoni yopiq Baza kanaliga nusxalab saqlash
+                forwarded_msg = await update.message.forward(chat_id=DATABASE_CHANNEL_ID)
+                msg_id = forwarded_msg.message_id
+
+                movies[code] = {
+                    "msg_id": msg_id,
+                    "caption": update.message.caption or "",
+                    "views": 0
+                }
                 save_data(FILES["movies"], movies)
-                await update.message.reply_text(f"✅ `{code}` kodli kino muvaffaqiyatli saqlandi!", parse_mode="Markdown")
-            elif update.message.document:
-                movies[code] = {"type": "document", "file_id": update.message.document.file_id, "caption": update.message.caption or "", "views": 0}
-                save_data(FILES["movies"], movies)
-                await update.message.reply_text(f"✅ `{code}` kodli kino fayli saqlandi!", parse_mode="Markdown")
-            else:
-                await update.message.reply_text("❌ Iltimos, video yoki fayl ko'rinishida yuboring!")
+                await update.message.reply_text(f"✅ `{code}` kodli kino muvaffaqiyatli saqlandi va yopiq baza kanaliga ko'chirildi!", parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Kanalga saqlashda xatolik: {e}")
+                await update.message.reply_text("❌ Videoni baza kanaliga saqlashda xatolik bo'ldi. Bot Baza kanalida ADMIN ekanligini va post joylash huquqi borligini tekshiring!")
             return
 
         elif step == "awaiting_chan_chatid":
@@ -378,10 +384,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         m["views"] = m.get("views", 0) + 1
         save_data(FILES["movies"], movies)
 
-        if m["type"] == "video":
-            await update.message.reply_video(video=m["file_id"], caption=m.get("caption", ""), protect_content=True)
-        elif m["type"] == "document":
-            await update.message.reply_document(document=m["file_id"], caption=m.get("caption", ""), protect_content=True)
+        try:
+            # Videoni Baza kanalidan olib foydalanuvchiga uzatish
+            if "msg_id" in m:
+                await context.bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=DATABASE_CHANNEL_ID,
+                    message_id=m["msg_id"],
+                    protect_content=True
+                )
+            elif "file_id" in m:
+                await update.message.reply_video(video=m["file_id"], caption=m.get("caption", ""), protect_content=True)
+        except Exception as e:
+            logger.error(f"Kino yuborishda xatolik: {e}")
+            await update.message.reply_text("❌ Kinoni yuklashda xatolik yuz berdi. Baza kanalidagi video o'chirilmaganini tekshiring.")
     else:
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
 
@@ -392,7 +408,7 @@ def main():
 
     app = Application.builder().token(TOKEN).build()
 
-    # Zayavkalarni avtomatik qabul qilish
+    # Zayavkalarni avtomatik tasdiqlash uchun handler
     app.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
 
     app.add_handler(CommandHandler("start", start))
