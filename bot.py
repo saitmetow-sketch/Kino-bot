@@ -3,6 +3,8 @@ import json
 import os
 import asyncio
 import threading
+import urllib.request
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -14,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 
-# --- RENDER PORT DUMMY SERVER ---
+# --- RENDER PORT DUMMY SERVER & SELF-PING ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -25,6 +27,19 @@ def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
     server.serve_forever()
+
+def keep_alive():
+    # Render avtomatik beradigan tashqi URL manzilini oladi
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not render_url:
+        return
+    while True:
+        time.sleep(420)  # Har 7 daqiqada (420 soniya) o'ziga so'rov yuboradi
+        try:
+            urllib.request.urlopen(render_url)
+            logger.info("Bot o'zini-o'zi uyg'otdi (Self-ping yuborildi).")
+        except Exception as e:
+            logger.error(f"Ping xatoligi: {e}")
 
 # --- LOGGING ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -118,7 +133,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     register_user(user_id)
     
-    # Admin bo'lsa doimiy tugma bilan kutib oladi
     reply_markup_custom = get_admin_reply_keyboard() if is_admin(user_id) else None
 
     is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
@@ -224,14 +238,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(user_id)
     text = update.message.text.strip() if update.message.text else ""
 
-    # ADMIN TUGMASI BOSILGANDA
     if is_admin(user_id) and text == "⚙️ Admin Panel":
         await send_admin_panel(update.message, user_id)
         return
 
     step = context.user_data.get("step")
 
-    # ADMIN ZANJIRI
     if is_admin(user_id) and step:
         if step == "awaiting_movie_code":
             context.user_data["temp_movie_code"] = text
@@ -265,7 +277,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == "awaiting_chan_title":
             context.user_data["temp_chan_title"] = text
             context.user_data["step"] = "awaiting_chan_url"
-            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini (linkini) yuboring:", parse_mode="Markdown")
+            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini (linkini yoki zayavka linkini) yuboring:", parse_mode="Markdown")
             return
 
         elif step == "awaiting_chan_url":
@@ -344,7 +356,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Post {count} ta foydalanuvchiga yuborildi!")
             return
 
-    # FOYDALANUVCHILAR UCHUN OBUNA TEKSHIRUVI
     is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
     if not is_subbed:
         await update.message.reply_text(
@@ -353,7 +364,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # KINO QIDIRISH
     code = text
     movies = load_data(FILES["movies"], {})
 
@@ -374,6 +384,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- MAIN ---
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
+    threading.Thread(target=keep_alive, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
 
