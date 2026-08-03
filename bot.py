@@ -138,7 +138,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
     if is_subbed:
         await update.message.reply_text(
-            "✅ Siz barcha kanallarga obuna bo'lgansiz!\n\n🍿 Kino kodini kiriting:",
+            "✅ Siz barcha kanallarga obuna bo'lgansiz!\n\n🔞 Kino kodini kiriting:",
             reply_markup=reply_markup_custom
         )
     else:
