@@ -120,10 +120,11 @@ def build_sub_keyboard(unsubbed_channels: list):
     keyboard.append([InlineKeyboardButton(settings.get("btn_text", "✅ Tasdiqlash"), callback_data="check_sub")])
     return InlineKeyboardMarkup(keyboard)
 
-# --- ADMIN MENYU TUGMALARI ---
+# --- ADMIN MENYU TUGMALARI (Yangi "📋 Kinolar ro'yxati" tugmasi qo'shildi) ---
 def get_admin_keyboard():
     keyboard = [
         [InlineKeyboardButton("🎬 Kino qo'shish", callback_data="adm_add_movie"), InlineKeyboardButton("🗑 Kino o'chirish", callback_data="adm_del_movie")],
+        [InlineKeyboardButton("📋 Kinolar ro'yxati", callback_data="adm_list_movies")],
         [InlineKeyboardButton("📢 Kanal qo'shish", callback_data="adm_add_chan"), InlineKeyboardButton("❌ Kanal o'chirish", callback_data="adm_del_chan")],
         [InlineKeyboardButton("📋 Kanallar", callback_data="adm_list_chan"), InlineKeyboardButton("✏️ Tugma matnini o'zgartirish", callback_data="adm_edit_btn")],
         [InlineKeyboardButton("📊 Statistika", callback_data="adm_stats"), InlineKeyboardButton("📨 Xabar yuborish", callback_data="adm_send")],
@@ -193,6 +194,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "adm_del_movie":
         context.user_data["step"] = "awaiting_del_movie_code"
         await query.message.reply_text("🗑 O'chirmoqchi bo'lgan kino kodini kiriting (Masalan: `101`):", parse_mode="Markdown")
+
+    # --- YANGI: KINOLAR RO'YXATINI KO'RSATISH ---
+    elif query.data == "adm_list_movies":
+        movies = load_data(FILES["movies"], {})
+        if not movies:
+            txt = "📜 Hali hech qanday kino qo'shilmagan."
+        else:
+            txt = f"🎬 **Mavjud kinolar ro'yxati** (Jami: **{len(movies)}** ta):\n\n"
+            for code, data in movies.items():
+                views = data.get("views", 0)
+                txt += f"• **Kodi:** `{code}` | 👁 **Ko'rilgan:** {views} marta\n"
+        await query.message.reply_text(txt, parse_mode="Markdown")
 
     elif query.data == "adm_add_chan":
         context.user_data["step"] = "awaiting_chan_chatid"
