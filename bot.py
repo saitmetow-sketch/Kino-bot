@@ -94,18 +94,24 @@ async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logger.error(f"Zayavkani tasdiqlashda xatolik: {e}")
 
-# --- OBUNANI TEKSHIRISH ---
+# --- OBUNANI TEKSHIRISH (XATOLIKLARNI ENGIBSH BILAN) ---
 async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     channels = load_data(FILES["channels"], [])
     unsubbed = []
 
     for ch in channels:
         try:
-            member = await context.bot.get_chat_member(chat_id=ch["chat_id"], user_id=user_id)
+            # Kanal ID sini integer ga o'tkazish
+            chat_id = ch["chat_id"]
+            if isinstance(chat_id, str) and (chat_id.startswith("-") or chat_id.isdigit()):
+                chat_id = int(chat_id)
+
+            member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status not in ["creator", "administrator", "member"]:
                 unsubbed.append(ch)
         except Exception as e:
-            logger.error(f"Kanal tekshirishda xatolik ({ch}): {e}")
+            # Agar bot kanalni Chat Not Found sababli topa olmasa, bot to'xtab qolmaydi
+            logger.error(f"Kanal tekshirishda xatolik ({ch['chat_id']}): {e}")
             unsubbed.append(ch)
 
     return (len(unsubbed) == 0), unsubbed
@@ -210,9 +216,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "awaiting_chan_chatid"
         await query.message.reply_text(
             "📢 **1-qadam:** Kanal Chat ID raqamini yoki Username'ini yuboring:\n\n"
-            "• Ochiq kanal bo'lsa: `@kanal_username`\n"
-            "• Yopiq (zayavka) kanal bo'lsa ID raqami: `-100123456789`\n\n"
-            "*(Eslatma: Bot ushbu kanalda ADMIN bo'lishi va foydalanuvchilarni qo'shish huquqi berilgan bo'lishi shart!)*", parse_mode="Markdown"
+            "• Ochiq kanal bo'lsa username: `@kanal_username`\n"
+            "• Yopiq (zayavka) kanal bo'lsa to'liq ID: `-1001234567890`\n\n"
+            "*(Muhim: Yopiq kanal bo'lsa, xatolik bermasligi uchun kanal havolasidan foydalangan ma'qul!)*", parse_mode="Markdown"
         )
 
     elif query.data == "adm_del_chan":
@@ -310,7 +316,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("step", None)
 
             try:
-                cid_val = int(cid) if cid.startswith("-") else cid
+                cid_val = int(cid) if str(cid).startswith("-") else cid
             except ValueError:
                 cid_val = cid
 
