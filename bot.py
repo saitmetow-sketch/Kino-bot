@@ -12,6 +12,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ChatJoinRequestHandler,
     ContextTypes,
     filters,
 )
@@ -29,15 +30,14 @@ def run_dummy_server():
     server.serve_forever()
 
 def keep_alive():
-    # Render avtomatik beradigan tashqi URL manzilini oladi
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if not render_url:
         return
     while True:
-        time.sleep(420)  # Har 7 daqiqada (420 soniya) o'ziga so'rov yuboradi
+        time.sleep(420)
         try:
             urllib.request.urlopen(render_url)
-            logger.info("Bot o'zini-o'zi uyg'otdi (Self-ping yuborildi).")
+            logger.info("Bot o'zini-o'zi uyg'otdi.")
         except Exception as e:
             logger.error(f"Ping xatoligi: {e}")
 
@@ -60,6 +60,7 @@ FILES = {
 # --- BAZA FUNKSIYALARI ---
 def load_data(filename, default):
     if not os.path.exists(filename):
+        save_data(filename, default)
         return default
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -83,18 +84,24 @@ def register_user(user_id: int):
         users.append(user_id)
         save_data(FILES["users"], users)
 
+# --- ZAYAVKALARNI AVTOMATIK QABUL QILISH ---
+async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        chat_join_request = update.chat_join_request
+        await chat_join_request.approve()
+        logger.info(f"Foydalanuvchi {chat_join_request.from_user.id} zayavkasi tasdiqlandi.")
+    except Exception as e:
+        logger.error(f"Zayavkani tasdiqlashda xatolik: {e}")
+
 # --- OBUNANI TEKSHIRISH ---
 async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TYPE):
-    default_channels = [
-        {"chat_id": "@kanal98766", "title": "1 - kanal", "url": "https://t.me/kanal98766"}
-    ]
-    channels = load_data(FILES["channels"], default_channels)
+    channels = load_data(FILES["channels"], [])
     unsubbed = []
 
     for ch in channels:
         try:
             member = await context.bot.get_chat_member(chat_id=ch["chat_id"], user_id=user_id)
-            if member.status not in ["creator", "administrator", "member", "restricted"]:
+            if member.status not in ["creator", "administrator", "member"]:
                 unsubbed.append(ch)
         except Exception as e:
             logger.error(f"Kanal tekshirishda xatolik ({ch}): {e}")
@@ -123,7 +130,6 @@ def get_admin_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- DOIMIY ADMIN TUGMASI (Reply Keyboard) ---
 def get_admin_reply_keyboard():
     keyboard = [[KeyboardButton("⚙️ Admin Panel")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -163,12 +169,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_subbed, unsubbed = await check_all_subscriptions(user_id, context)
         reply_markup_custom = get_admin_reply_keyboard() if is_admin(user_id) else None
         if is_subbed:
-            await query.message.edit_text("✅ Siz barcha kanallarga obuna bo'ldingiz!\n\n🍿 Kino kodini kiriting:")
+            await query.message.edit_text("✅ Siz barcha kanallarga obuna bo'ldingiz!\n\n🔞 Kino kodini kiriting:")
             if reply_markup_custom:
                 await query.message.reply_text("⚙️ Admin boshqaruvi yoqilgan.", reply_markup=reply_markup_custom)
         else:
             await query.message.reply_text(
-                "❌ Kechirasiz botimizdan foydalanishdan oldin ushbu kanallarga a'zo bo'lishingiz kerak.",
+                "❌ Kechirasiz, siz hali barcha kanallarga a'zo bo'lmadingiz!",
                 reply_markup=build_sub_keyboard(unsubbed)
             )
         return
@@ -193,7 +199,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📢 **1-qadam:** Kanal Chat ID raqamini yoki Username'ini yuboring:\n\n"
             "• Ochiq kanal bo'lsa: `@kanal_username`\n"
             "• Yopiq (zayavka) kanal bo'lsa ID raqami: `-100123456789`\n\n"
-            "*(Eslatma: Bot ushbu kanalda ADMIN bo'lishi shart!)*", parse_mode="Markdown"
+            "*(Eslatma: Bot ushbu kanalda ADMIN bo'lishi va foydalanuvchilarni qo'shish huquqi berilgan bo'lishi shart!)*", parse_mode="Markdown"
         )
 
     elif query.data == "adm_del_chan":
@@ -212,7 +218,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "adm_edit_btn":
         context.user_data["step"] = "awaiting_btn_text"
-        await query.message.reply_text("✏️ Pastdagi tasdiqlash tugmasi matnini yuboring (Masalan: `✅ Tekshirish` yoki `✅ Tasdiqlash`):")
+        await query.message.reply_text("✏️ Pastdagi tasdiqlash tugmasi matnini yuboring (Masalan: `✅ Tekshirish`):")
 
     elif query.data == "adm_stats":
         users = load_data(FILES["users"], [])
@@ -277,7 +283,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == "awaiting_chan_title":
             context.user_data["temp_chan_title"] = text
             context.user_data["step"] = "awaiting_chan_url"
-            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini (linkini yoki zayavka linkini) yuboring:", parse_mode="Markdown")
+            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini yuboring:", parse_mode="Markdown")
             return
 
         elif step == "awaiting_chan_url":
@@ -376,8 +382,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_video(video=m["file_id"], caption=m.get("caption", ""), protect_content=True)
         elif m["type"] == "document":
             await update.message.reply_document(document=m["file_id"], caption=m.get("caption", ""), protect_content=True)
-        elif m["type"] == "text":
-            await update.message.reply_text(text=m["text"])
     else:
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
 
@@ -387,6 +391,9 @@ def main():
     threading.Thread(target=keep_alive, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
+
+    # Zayavkalarni avtomatik qabul qilish
+    app.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", lambda u, c: send_admin_panel(u.message, u.effective_user.id)))
