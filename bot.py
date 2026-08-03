@@ -56,8 +56,7 @@ FILES = {
     "channels": "channels.json",
     "admins": "admins.json",
     "settings": "settings.json",
-    "requests": "join_requests.json",
-    "auto_msg": "auto_msg.json"
+    "requests": "join_requests.json"
 }
 
 # --- BAZA FUNKSIYALARI ---
@@ -87,17 +86,7 @@ def register_user(user_id: int):
         users.append(user_id)
         save_data(FILES["users"], users)
 
-# --- LOG KANALGA XABAR YUBORISH ---
-async def send_log(context: ContextTypes.DEFAULT_TYPE, text: str):
-    settings = load_data(FILES["settings"], {})
-    log_channel = settings.get("log_channel")
-    if log_channel:
-        try:
-            await context.bot.send_message(chat_id=log_channel, text=text, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Log kanalga xabar yuborishda xatolik: {e}")
-
-# --- ZAYAVKANI ESMATIB QOLISH (AVTO-APPROVE QILMAYDI!) ---
+# --- ZAYAVKALARNI ESMATIB QOLISH (AVTO-APPROVE QILMAYDI) ---
 async def track_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         req = update.chat_join_request
@@ -115,7 +104,6 @@ async def track_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
             save_data(FILES["requests"], requests_data)
             
         logger.info(f"Foydalanuvchi {user_id} {chat_id} kanaliga zayavka yubordi.")
-        await send_log(context, f"📥 **Yangi zayavka!**\n👤 User ID: `{user_id}`\n📢 Kanal ID: `{chat_id}`")
     except Exception as e:
         logger.error(f"Zayavkani saqlashda xatolik: {e}")
 
@@ -133,10 +121,12 @@ async def check_all_subscriptions(user_id: int, context: ContextTypes.DEFAULT_TY
             if isinstance(chat_id, str) and (chat_id.startswith("-") or chat_id.isdigit()):
                 chat_id = int(chat_id)
 
+            # 1. A'zomi?
             member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status in ["creator", "administrator", "member"]:
                 continue
 
+            # 2. Zayavka yuborganmi?
             if chat_id in user_requests or str(chat_id) in user_requests:
                 continue
 
@@ -164,7 +154,6 @@ def get_admin_keyboard():
         [InlineKeyboardButton("📋 Kinolar ro'yxati", callback_data="adm_list_movies")],
         [InlineKeyboardButton("📢 Kanal qo'shish", callback_data="adm_add_chan"), InlineKeyboardButton("❌ Kanal o'chirish", callback_data="adm_del_chan")],
         [InlineKeyboardButton("📋 Kanallar", callback_data="adm_list_chan"), InlineKeyboardButton("✏️ Tugma matnini o'zgartirish", callback_data="adm_edit_btn")],
-        [InlineKeyboardButton("📜 Log kanal sozlash", callback_data="adm_set_log"), InlineKeyboardButton("⏰ Avto-xabar", callback_data="adm_auto_msg")],
         [InlineKeyboardButton("📊 Statistika", callback_data="adm_stats"), InlineKeyboardButton("📨 Xabar yuborish", callback_data="adm_send")],
         [InlineKeyboardButton("👥 Admin qo'shish", callback_data="adm_add_admin"), InlineKeyboardButton("🏠 Bosh sahifa", callback_data="adm_home")]
     ]
@@ -246,7 +235,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "adm_add_chan":
         context.user_data["step"] = "awaiting_chan_chatid"
-        await query.message.reply_text("📢 **1-qadam:** Kanal Chat ID raqamini yoki Username'ini yuboring:", parse_mode="Markdown")
+        await query.message.reply_text(
+            "📢 **1-qadam:** Kanal Chat ID raqamini yoki Username'ini yuboring:\n\n"
+            "• Ochiq kanal bo'lsa: `@kanal_username`\n"
+            "• Yopiq (zayavka) kanal bo'lsa ID raqami: `-1001234567890`", parse_mode="Markdown"
+        )
 
     elif query.data == "adm_del_chan":
         context.user_data["step"] = "awaiting_channel_del"
@@ -264,39 +257,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "adm_edit_btn":
         context.user_data["step"] = "awaiting_btn_text"
-        await query.message.reply_text("✏️ Pastdagi tasdiqlash tugmasi matnini yuboring:")
-
-    elif query.data == "adm_set_log":
-        context.user_data["step"] = "awaiting_log_channel"
-        await query.message.reply_text("📜 **Log kanalini ulash:**\n\nLoglar borib tushishi kerak bo'lgan yopiq kanalingiz ID sini yuboring (Masalan: `-1001234567890`).\n\n*(Eslatma: Bot o'sha kanalda ADMIN bo'lishi shart!)*", parse_mode="Markdown")
-
-    elif query.data == "adm_auto_msg":
-        auto_data = load_data(FILES["auto_msg"], {"status": "off", "interval": 10, "text": ""})
-        st = "✅ Yoqilgan" if auto_data["status"] == "on" else "❌ O'chirilgan"
-        msg = auto_data.get("text", "O'rnatilmagan")
-        
-        txt = f"⏰ **AVTOMATIK XABAR SOZLAMALARI**\n\n📊 Holati: **{st}**\n⏱ Interval: **Har {auto_data['interval']} soatda**\n📝 Xabar: `{msg}`"
-        kb = [
-            [InlineKeyboardButton("🟢 Yoqish" if auto_data["status"] == "off" else "🔴 O'chirish", callback_data="toggle_auto_msg")],
-            [InlineKeyboardButton("✏️ Xabarni o'rnatish", callback_data="set_auto_msg_text")],
-            [InlineKeyboardButton("⏱ Vaqt oraliqini o'zgartirish", callback_data="set_auto_msg_time")],
-            [InlineKeyboardButton("🏠 Admin panel", callback_data="adm_home")]
-        ]
-        await query.message.reply_text(txt, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif query.data == "toggle_auto_msg":
-        auto_data = load_data(FILES["auto_msg"], {"status": "off", "interval": 10, "text": ""})
-        auto_data["status"] = "on" if auto_data["status"] == "off" else "off"
-        save_data(FILES["auto_msg"], auto_data)
-        await query.message.reply_text(f"Avto-xabar holati o'zgartirildi: **{auto_data['status']}**")
-
-    elif query.data == "set_auto_msg_text":
-        context.user_data["step"] = "awaiting_auto_text"
-        await query.message.reply_text(" Avto-xabar sifatida har intervalda barchaga yuborilishi kerak bo'lgan matnni yuboring:")
-
-    elif query.data == "set_auto_msg_time":
-        context.user_data["step"] = "awaiting_auto_time"
-        await query.message.reply_text("⏱ Necha soatda bir xabar yuborilsin? Soat miqdorini raqamda yuboring (Masalan: `10`):", parse_mode="Markdown")
+        await query.message.reply_text("✏️ Pastdagi tasdiqlash tugmasi matnini yuboring (Masalan: `✅ Tekshirish`):")
 
     elif query.data == "adm_stats":
         users = load_data(FILES["users"], [])
@@ -351,7 +312,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
                 save_data(FILES["movies"], movies)
                 await update.message.reply_text(f"✅ `{code}` kodli kino muvaffaqiyatli saqlandi!", parse_mode="Markdown")
-                await send_log(context, f"🎬 **Yangi kino qo'shildi!**\n🆔 Kod: `{code}`")
             except Exception as e:
                 logger.error(f"Kanalga saqlashda xatolik: {e}")
                 await update.message.reply_text("❌ Videoni baza kanaliga saqlashda xatolik bo'ldi.")
@@ -360,13 +320,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == "awaiting_chan_chatid":
             context.user_data["temp_chan_id"] = text
             context.user_data["step"] = "awaiting_chan_title"
-            await update.message.reply_text("📝 **2-qadam:** Tugmada ko'rinadigan nomni yozing:")
+            await update.message.reply_text("📝 **2-qadam:** Tugmada ko'rinadigan nomni yozing (Masalan: `1 - kanal`):", parse_mode="Markdown")
             return
 
         elif step == "awaiting_chan_title":
             context.user_data["temp_chan_title"] = text
             context.user_data["step"] = "awaiting_chan_url"
-            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini yuboring:")
+            await update.message.reply_text("🔗 **3-qadam:** Kanal havolasini yuboring:", parse_mode="Markdown")
             return
 
         elif step == "awaiting_chan_url":
@@ -387,38 +347,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Kanal qo'shildi!\n📌 **Nomi:** {title}\n🆔 **ID:** `{cid_val}`", parse_mode="Markdown")
             return
 
-        elif step == "awaiting_log_channel":
-            context.user_data.pop("step", None)
-            try:
-                log_id = int(text)
-                settings = load_data(FILES["settings"], {})
-                settings["log_channel"] = log_id
-                save_data(FILES["settings"], settings)
-                await update.message.reply_text(f"✅ Log kanali o'rnatildi: `{log_id}`", parse_mode="Markdown")
-            except ValueError:
-                await update.message.reply_text("To'g'ri Kanal ID raqamini kiriting (Masalan: `-1001234567890`)!")
-            return
-
-        elif step == "awaiting_auto_text":
-            context.user_data.pop("step", None)
-            auto_data = load_data(FILES["auto_msg"], {})
-            auto_data["text"] = text
-            save_data(FILES["auto_msg"], auto_data)
-            await update.message.reply_text("✅ Avto-xabar matni saqlandi!")
-            return
-
-        elif step == "awaiting_auto_time":
-            context.user_data.pop("step", None)
-            try:
-                hours = float(text)
-                auto_data = load_data(FILES["auto_msg"], {})
-                auto_data["interval"] = hours
-                save_data(FILES["auto_msg"], auto_data)
-                await update.message.reply_text(f"✅ Avto-xabar vaqti {hours} soatga o'zgartirildi!")
-            except ValueError:
-                await update.message.reply_text("Raqam kiritishingiz kerak!")
-            return
-
         elif step == "awaiting_btn_text":
             context.user_data.pop("step", None)
             settings = load_data(FILES["settings"], {})
@@ -431,8 +359,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("step", None)
             channels = load_data(FILES["channels"], [])
             new_channels = [c for c in channels if str(c["chat_id"]) != text and str(c.get("url")) != text]
-            save_data(FILES["channels"], new_channels)
-            await update.message.reply_text(f"🗑 Kanal o'chirildi: {text}")
+            
+            if len(new_channels) < len(channels):
+                save_data(FILES["channels"], new_channels)
+                await update.message.reply_text(f"🗑 Kanal o'chirildi: {text}")
+            else:
+                await update.message.reply_text("❌ Bunday kanal topilmadi.")
             return
 
         elif step == "awaiting_del_movie_code":
@@ -444,6 +376,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"🗑 `{text}` kodli kino o'chirildi!", parse_mode="Markdown")
             else:
                 await update.message.reply_text("❌ Kiritilgan kod bo'yicha kino topilmadi.")
+            return
+
+        elif step == "awaiting_admin_id":
+            context.user_data.pop("step", None)
+            try:
+                aid = int(text)
+                admins = load_data(FILES["admins"], [])
+                if aid not in admins:
+                    admins.append(aid)
+                    save_data(FILES["admins"], admins)
+                    await update.message.reply_text(f"✅ Yangi admin qo'shildi: `{aid}`", parse_mode="Markdown")
+            except ValueError:
+                await update.message.reply_text("Raqamli Telegram ID kiriting!")
             return
 
         elif step == "awaiting_broadcast":
@@ -486,38 +431,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             elif "file_id" in m:
                 await update.message.reply_video(video=m["file_id"], caption=m.get("caption", ""), protect_content=True)
-            
-            await send_log(context, f"👁 **Kino ko'rildi!**\n👤 User: `{user_id}`\n🎬 Kod: `{code}`")
         except Exception as e:
             logger.error(f"Kino yuborishda xatolik: {e}")
             await update.message.reply_text("❌ Kinoni yuklashda xatolik yuz berdi.")
     else:
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
 
-# --- AVTO-XABAR TIZIMI (BACKGROUND TASK) ---
-async def auto_message_loop(app):
-    while True:
-        try:
-            auto_data = load_data(FILES["auto_msg"], {"status": "off", "interval": 10, "text": ""})
-            if auto_data.get("status") == "on" and auto_data.get("text"):
-                users = load_data(FILES["users"], [])
-                for uid in users:
-                    try:
-                        await app.bot.send_message(chat_id=uid, text=auto_data["text"], parse_mode="Markdown")
-                        await asyncio.sleep(0.05)
-                    except Exception:
-                        pass
-            interval_seconds = float(auto_data.get("interval", 10)) * 3600
-            await asyncio.sleep(interval_seconds)
-        except Exception as e:
-            logger.error(f"Avto-xabar siklida xatolik: {e}")
-            await asyncio.sleep(3600)
-
-# --- MAIN ---
-def main():
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-    threading.Thread(target=keep_alive, daemon=True).start()
-
+# --- ASYNC MAIN (Python 3.12+ uchun moslashtirilgan) ---
+async def main_async():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(ChatJoinRequestHandler(track_join_request))
@@ -526,12 +447,17 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
-    # Avto xabarni ishga tushirish
-    loop = asyncio.get_event_loop()
-    loop.create_task(auto_message_loop(app))
-
-    print("Bot muvaffaqiyatli ishga tushdi...")
-    app.run_polling()
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+        print("Bot muvaffaqiyatli ishga tushdi...")
+        await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    threading.Thread(target=keep_alive, daemon=True).start()
+
+    try:
+        asyncio.run(main_async())
+    except (KeyboardInterrupt, SystemExit):
+        pass
